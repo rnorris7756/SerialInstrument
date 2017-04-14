@@ -6,6 +6,7 @@ serialinstrument.py: A class for interacting with laboratory instruments over an
 
 import time
 import serial
+from enum import Enum
 
 debug = True
 
@@ -24,6 +25,9 @@ function_generators = ['HEWLETT-PACKARD,33120A,0,10.0-5.0-1.0'
 
 power_supplies = ['Agilent Technologies,E3646A,0,1.4-5.0-1.0'
         ]
+
+outputs = Enum('outputs', 'out1 out2')
+voltage_range = Enum('voltage_range', 'low high')
 
 class SerialInstrument():
     """docstring for SerialInstrument"""
@@ -139,12 +143,17 @@ class SerialInstrument():
         """Returns the identity string of the instrument."""
         return self.query_serial('*IDN?')
 
+    def reset(self):
+        """Resets the instrument to its power-on state."""
+        self.write_to_serial('*RST')
+        
+
     def __del__(self):
         """Clean up the serial connection (if still open) after we are done with the device."""
         if self._ser.isOpen():
+            self.reset()
             self.set_local()
             self._ser.close()
-        
 
 
 class FunctionGenerator(SerialInstrument):
@@ -155,7 +164,6 @@ class FunctionGenerator(SerialInstrument):
     def from_serial_instrument(self, instrument):
         """Takes a SerialInstrument and converts it into a FunctionGenerator"""
         return FunctionGenerator(ser=instrument._ser)
-
 
 
 class Multimeter(SerialInstrument):
@@ -176,24 +184,41 @@ class Multimeter(SerialInstrument):
        """Performs one measurement of DC voltage using the multimeter with the range defined in RNG and the resolution defined in RES."""
        self.configure_vdc(rng, res, unit)
        self.write_to_serial(':samp:coun ' + str(samp))
-       print(self.query_serial('read?'))
+       return float(self.query_serial('read?'))
+    
 
 class PowerSupply(SerialInstrument):
     """A DC power supply as a subclass of a SerialInstrument."""
+
     def __init__(self, **kwargs):
         super(PowerSupply, self).__init__(**kwargs)
+        self._output_state = {outputs.out1 : False, outputs.out2 : False}
+        self._selected_output = None
+        self._voltage_output_range = None
+        self.write_to_serial('*RST')
 
     @classmethod
     def from_serial_instrument(self, instrument):
         """Takes a SerialInstrument and converts it into a PowerSupply"""
         return PowerSupply(ser=instrument._ser)
 
-    def set_output(self, output_voltage, output_port = 'OUT1'):
-        """Sets the output voltage on the desired port"""
-        self.write_to_serial(':inst:sel ' + output_port)
-        self.write_to_serial(':appl:')
-        
-        
+    def set_output_voltage(self, output_voltage, output_port = outputs.out1):
+        """Sets the output voltage on the desired port.  Several if statements are used here to reduce unnecessary serial writes."""
+        if abs(output_voltage) < 8.0 and self._voltage_output_range != voltage_range.low:
+            self.write_to_serial(':volt:rang low')
+            self._voltage_output_range = voltage_range.low
+        elif abs(output_voltage) >= 8.0 and self._voltage_output_range != voltage_range.high:
+            self.write_to_serial(':volt:rang high')
+            self._voltage_output_range = voltage_range.high
+
+        if self._output_state[output_port] is False:
+            self.write_to_serial(':outp:stat on')
+
+        if self._selected_output != output_port:
+            self.write_to_serial(':inst:sel ' + output_port.name)
+            self._selected_output = output_port
+
+        self.write_to_serial(':volt ' + str(output_voltage))
 
 
 if __name__ == '__main__':
@@ -207,5 +232,5 @@ if __name__ == '__main__':
     for instrument in instruments:
         print(instrument._identity + " on " + instrument._port)
     inst = []
-    #for instrument in instruments:
-    #    inst.append(instrument.classify_instrument())
+    for instrument in instruments:
+        inst.append(instrument.classify_instrument())
