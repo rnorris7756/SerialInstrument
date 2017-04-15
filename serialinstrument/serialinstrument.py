@@ -184,7 +184,31 @@ class Multimeter(SerialInstrument):
        """Performs one measurement of DC voltage using the multimeter with the range defined in RNG and the resolution defined in RES."""
        self.configure_vdc(rng, res, unit)
        self.write_to_serial(':samp:coun ' + str(samp))
-       return float(self.query_serial('read?'))
+       if samp == 1:
+         return float(self.query_serial('read?'))
+       else:
+         samples = self.query_serial('read?').split(',')
+         sampleresult = []
+         for sample in samples:
+             sampleresult.append(float(sample))
+         return sampleresult
+
+    def configure_adc(self, rng, res, unit = 'A'):
+        """Configures the multimeter to read DC voltage with range rng and resolution res"""
+        self.write_to_serial(':conf:curr:dc ' + str(rng) + ',' + str(res))# + unit)
+
+    def measure_adc(self, rng = 'DEF', res = 'DEF', unit = 'A', samp = 1):
+       """Performs one measurement of DC amperage using the multimeter with the range defined in RNG and the resolution defined in RES."""
+       self.configure_adc(rng, res, unit)
+       self.write_to_serial(':samp:coun ' + str(samp))
+       if samp == 1:
+         return float(self.query_serial('read?'))
+       else:
+         samples = self.query_serial('read?').split(',')
+         sampleresult = []
+         for sample in samples:
+             sampleresult.append(float(sample))
+         return sampleresult
     
 
 class PowerSupply(SerialInstrument):
@@ -219,6 +243,21 @@ class PowerSupply(SerialInstrument):
             self._selected_output = output_port
 
         self.write_to_serial(':volt ' + str(output_voltage))
+
+    def set_output_current(self, output_current, output_port = outputs.out1):
+        """Sets the output current on the desired port.  Several if statements are used here to reduce unnecessary serial writes."""
+        #If the voltage is in the low limit, current will probably be limited.  So, always set to high voltage here.
+        #This should probably be smarter in a future release, so that it only goes to high voltage if low voltage is insufficient to drive the desired current.
+        self.set_output_voltage(20.0 , output_port)
+
+        if self._output_state[output_port] is False:
+            self.write_to_serial(':outp:stat on')
+
+        if self._selected_output != output_port:
+            self.write_to_serial(':inst:sel ' + output_port.name)
+            self._selected_output = output_port
+
+        self.write_to_serial(':curr ' + str(output_current))
 
 
 if __name__ == '__main__':
